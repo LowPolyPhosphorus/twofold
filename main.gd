@@ -1,13 +1,24 @@
 extends Node2D
 
 const TILE := 64
-const OFFSET := Vector2(100, 100)
+const OFFSET := Vector2.ZERO
 const TEX_WALL := preload("res://art/wall.png")
 const TEX_FLOOR := preload("res://art/floor.png")
 const TEX_GOAL := preload("res://art/goal.png")
 const TEX_GOAL_LIT := preload("res://art/goal_lit.png")
 const TEX_BLOB := preload("res://art/blob.png")
+const TEX_GATE := preload("res://art/gate.png")
+const TEX_BUTTON := preload("res://art/button.png")
+const TEX_BUTTON_PRESSED := preload("res://art/button-pressed.png")
+const GOAL_FRAMES := 17
+const GOAL_FPS := 30.0
+const SPLIT_FRAMES := 25
+const SPLIT_FPS := 30.0
+const PAUSE_LABELS := ["Resume", "Restart", "Quit to title"]
 
+var paused := false
+var split_frames: Array[Texture2D] = []
+var split_anim := {}
 var walls := {}
 var buttons: Array[Vector2i] = []
 var doors := {}
@@ -21,8 +32,15 @@ var won := false
 var levels := Levels.DATA  
 var current := 0
 var level: Array = []
+var goal_frames: Array[Texture2D] = []
+var goal_p := {}
 
 func _ready() -> void:
+	for i in range(1, GOAL_FRAMES + 1):
+		goal_frames.append(load("res://art/goal-transition/goal-transition-%d.png" % i))
+	for i in range(1, SPLIT_FRAMES + 1):
+		split_frames.append(load("res://art/split-transition/split-transition-%d.png" % i))
+	get_viewport().size_changed.connect(queue_redraw)
 	load_level()
 
 func load_level() -> void:
@@ -33,6 +51,7 @@ func load_level() -> void:
 	buttons.clear()
 	doors.clear()
 	history.clear()
+	split_anim = {}
 	won = false
 	for y in level.size():
 		for x in level[y].length():
@@ -43,6 +62,9 @@ func load_level() -> void:
 				"B": blobs.append(pos)
 				"b": buttons.append(pos)
 				"D": doors[pos] = true
+	goal_p.clear()
+	for g in goals:
+		goal_p[g] = 0.0
 	sync_vis(true)
 	queue_redraw()
 
@@ -76,6 +98,7 @@ func split() -> void:
 		var t: Vector2i = blobs[0] + d
 		if is_free(t, is_open) and not blobs.has(t):
 			blobs.append(t)
+			split_anim = {"pos": blobs[0], "dir": d, "idx": blobs.size() - 1, "p": 0.0}
 			return
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -98,9 +121,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			if history.size() > 0:
 				blobs.assign(history.pop_back())
 				sync_vis()
+				split_anim = {}
 				won = false
 				queue_redraw()
 			return
+	if not split_anim.is_empty():
+		return
 	if won:
 		if event.is_action_pressed("ui_accept") and current < levels.size() - 1:
 			current += 1
@@ -142,6 +168,16 @@ func _unhandled_input(event: InputEvent) -> void:
 func tile_center(p: Vector2i) -> Vector2:
 	return OFFSET + Vector2(p) * TILE + Vector2(TILE, TILE) / 2
 
+func board_scale() -> float:
+	var vp := get_viewport_rect().size
+	var board := Vector2(level[0].length(), level.size()) * TILE
+	return minf(vp.x * 0.75 / board.x, vp.y * 0.75 / board.y)
+
+func board_pos() -> Vector2:
+	var vp := get_viewport_rect().size
+	var board := Vector2(level[0].length(), level.size()) * TILE * board_scale()
+	return (vp - board) / 2
+
 func sync_vis(snap := false) -> void:
 	if snap:
 		vis.clear()
@@ -155,6 +191,26 @@ func _process(delta: float) -> void:
 		title_t += delta
 		queue_redraw()
 		return
+	if paused: 
+		queue_redraw()
+		return
+	if not split_anim.is_empty():
+		split_anim.p += SPLIT_FPS * delta
+		if split_anim.p >= SPLIT_FRAMES:
+			var i: int = split_anim.idx
+			if i < vis.size():
+				vis[i] = tile_center(blobs[i])
+			split_anim = {}
+		queue_redraw()
+	var goal_changed := false
+	for g in goals:
+		var p: float = goal_p[g]
+		var np := clampf(p + (GOAL_FPS if blobs.has(g) else -GOAL_FPS) * delta, 0.0, float(GOAL_FRAMES))
+		if np != p:
+			goal_p[g] = np
+			goal_changed = true
+	if goal_changed:
+		queue_redraw()
 	if vis.size() != blobs.size():
 		return
 	var changed := false
@@ -186,10 +242,29 @@ func draw_title() -> void:
 	draw_style_box(box, r)
 	draw_string(font, Vector2(r.position.x, r.position.y + 47), "Start", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 32, Color("1b1b27"))
 
+func pause_rect(i: int) -> Rect2:
+	var vp := get_viewport_rect().size
+	return Rect2(Vector2(vp.x / 2 - 130, vp.y * 0.4 + i * 90), Vector2(260, 70))
+
+func draw_pause() -> void:
+	var vp := get_viewport_rect().size
+	var font := ThemeDB.fallback_font
+	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.08, 0.08, 0.08, 0.8))
+	draw_string(font, Vector2(0, vp.y * 0.3), "Paused", HORIZONTAL_ALIGNMENT_CENTER, vp.x, 64, Color("ffffff"))
+	for i in PAUSE_LABELS.size():
+		var r := pause_rect(i)
+		var hover := r.has_point(get_local_mouse_position())
+		var box := StyleBoxFlat.new()
+		box.bg_color = Color("ffffff") if hover else Color("d0d0d0")
+		box.set_corner_radius_all(14)
+		draw_style_box(box, r)
+		draw_string(font, Vector2(r.position.x, r.position.y + 47), PAUSE_LABELS[i], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 32, Color("141414"))
+
 func _draw() -> void:
 	if on_title:
 		draw_title()
 		return
+	draw_set_transform(board_pos(), 0.0, Vector2.ONE * board_scale())
 	var size := Vector2(TILE, TILE)
 	for y in level.size():
 		for x in level[y].length():
