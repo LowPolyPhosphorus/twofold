@@ -10,6 +10,8 @@ const TEX_BLOB := preload("res://art/blob.png")
 const TEX_GATE := preload("res://art/gate.png")
 const TEX_BUTTON := preload("res://art/button.png")
 const TEX_BUTTON_PRESSED := preload("res://art/button-pressed.png")
+const TEX_ICE := preload("res://art/ice.png")
+const TEX_LOGO := preload("res://art/logo.png")
 const GOAL_FRAMES := 17
 const GOAL_FPS := 30.0
 const SPLIT_FRAMES := 25
@@ -34,6 +36,8 @@ var current := 0
 var level: Array = []
 var goal_frames: Array[Texture2D] = []
 var goal_p := {}
+var ice := {}
+var lv := {}
 
 func _ready() -> void:
 	for i in range(1, GOAL_FRAMES + 1):
@@ -41,16 +45,24 @@ func _ready() -> void:
 	for i in range(1, SPLIT_FRAMES + 1):
 		split_frames.append(load("res://art/split-transition/split-transition-%d.png" % i))
 	get_viewport().size_changed.connect(queue_redraw)
+	for i in levels.size():
+		var r := Rules.solve(Rules.parse(levels[i]))
+		if r.solved:
+			print("Level %d: %d moves  %s" % [i + 1, r.moves, "".join(r.path)])
+		else:
+			print("Level %d: no solution (%d states)" % [i + 1, r.states])
 	load_level()
 
 func load_level() -> void:
 	level = levels[current]
+	lv = Rules.parse(level)
 	walls.clear()
 	goals.clear()
 	blobs.clear()
 	buttons.clear()
 	doors.clear()
 	history.clear()
+	ice.clear()
 	split_anim = {}
 	won = false
 	for y in level.size():
@@ -62,6 +74,7 @@ func load_level() -> void:
 				"B": blobs.append(pos)
 				"b": buttons.append(pos)
 				"D": doors[pos] = true
+				"I": ice[pos] = true
 	goal_p.clear()
 	for g in goals:
 		goal_p[g] = 0.0
@@ -69,25 +82,17 @@ func load_level() -> void:
 	queue_redraw()
 
 func check_win() -> void:
-	won = true
-	for g in goals:
-		if not blobs.has(g):
-			won = false
+	won = Rules.is_won(lv, blobs)
 
 func doors_open() -> bool:
-	for b in buttons:
-		if not blobs.has(b):
-			return false
-	return true
+	return Rules.doors_open(lv, blobs)
 
-func is_free(pos: Vector2i, is_open: bool) -> bool:
-	if pos.y < 0 or pos.y >= level.size():
-		return false
-	if pos.x < 0 or pos.x >= level[pos.y].length():
-		return false
-	if doors.has(pos) and not is_open:
-		return false
-	return not walls.has(pos)
+func split() -> void:
+	var d := Rules.split_dir(lv, blobs)
+	if d == Vector2i.ZERO:
+		return
+	blobs.append(blobs[0] + d)
+	split_anim = {"pos": blobs[0], "dir": d, "idx": blobs.size() - 1, "p": 0.0}
 
 func split() -> void:
 	if blobs.size() >= goals.size():
@@ -159,11 +164,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.is_action_pressed("ui_down"): dir = Vector2i.DOWN
 		if dir == Vector2i.ZERO:
 			return
-		var is_open := doors_open()
-		for i in blobs.size():
-			var target := blobs[i] + dir
-			if is_free(target, is_open):
-				blobs[i] = target
+		blobs.assign(Rules.slid(lv, blobs, dir))
 		var unique: Array[Vector2i] = []
 		var unique_vis: Array[Vector2] = []
 		for i in blobs.size():
@@ -247,15 +248,20 @@ func start_rect() -> Rect2:
 func draw_title() -> void:
 	var vp := get_viewport_rect().size
 	var font := ThemeDB.fallback_font
-	draw_rect(Rect2(Vector2.ZERO, vp), Color("1b1b27"))
-	draw_string(ThemeDB.fallback_font, Vector2(0, vp.y * 0.55), "Twofold", HORIZONTAL_ALIGNMENT_CENTER, vp.x, 96, Color("e8e8f0"))
+	draw_rect(Rect2(Vector2.ZERO, vp), Color("0a0a0a"))
+	var ls := TEX_LOGO.get_size()
+	var lw := minf(ls.x, vp.x * 0.6)
+	var lh := lw * ls.y / ls.x
+	draw_texture_rect(TEX_LOGO, Rect2(Vector2((vp.x - lw) / 2, vp.y * 0.45 - lh / 2), Vector2(lw, lh)), false)
 	var r := start_rect()
 	var hover := r.has_point(get_local_mouse_position())
 	var box := StyleBoxFlat.new()
-	box.bg_color = Color("7be3a3") if hover else Color("5fd38d")
+	box.bg_color = Color("0a0a0a") if hover else Color("ffffff")
+	box.border_color = Color("ffffff")
+	box.set_border_width_all(3)
 	box.set_corner_radius_all(14)
 	draw_style_box(box, r)
-	draw_string(font, Vector2(r.position.x, r.position.y + 47), "Start", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 32, Color("1b1b27"))
+	draw_string(font, Vector2(r.position.x, r.position.y + 47), "Start", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 32, Color("ffffff") if hover else Color("0a0a0a"))
 
 func pause_rect(i: int) -> Rect2:
 	var vp := get_viewport_rect().size
@@ -286,6 +292,8 @@ func _draw() -> void:
 			var pos := Vector2i(x, y)
 			var tex := TEX_WALL if walls.has(pos) else TEX_FLOOR
 			draw_texture_rect(tex, Rect2(OFFSET + Vector2(pos) * TILE, size), false)
+			if ice.has(pos):
+				draw_texture_rect(TEX_ICE, Rect2(OFFSET + Vector2(pos) * TILE, size), false)
 	for g in goals:
 		var p: float = goal_p[g]
 		var tex: Texture2D = TEX_GOAL if p < 1.0 else goal_frames[int(p) - 1]
