@@ -109,9 +109,24 @@ func _unhandled_input(event: InputEvent) -> void:
 			on_title = false
 			queue_redraw()
 		return
+	if paused:
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			paused = false
+		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			var m := get_local_mouse_position()
+			if pause_rect(0).has_point(m):
+				paused = false
+			elif pause_rect(1).has_point(m):
+				paused = false
+				load_level()
+			elif pause_rect(2).has_point(m):
+				paused = false
+				on_title = true
+		queue_redraw()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
-			on_title = true
+			paused = true
 			queue_redraw()
 			return
 		if event.keycode == KEY_R:
@@ -272,21 +287,34 @@ func _draw() -> void:
 			var tex := TEX_WALL if walls.has(pos) else TEX_FLOOR
 			draw_texture_rect(tex, Rect2(OFFSET + Vector2(pos) * TILE, size), false)
 	for g in goals:
-		var tex := TEX_GOAL_LIT if blobs.has(g) else TEX_GOAL
+		var p: float = goal_p[g]
+		var tex: Texture2D = TEX_GOAL if p < 1.0 else goal_frames[int(p) - 1]
 		draw_texture_rect(tex, Rect2(OFFSET + Vector2(g) * TILE, size), false)
 	for b in buttons:
-		var c:= tile_center(b)
-		draw_rect(Rect2(c - Vector2(20, 20), Vector2(40, 40)), Color("ffb4a2") if blobs.has(b) else Color("e07a5f"))
+		var tex: Texture2D = TEX_BUTTON_PRESSED if blobs.has(b) else TEX_BUTTON
+		draw_texture_rect(tex, Rect2(OFFSET + Vector2(b) * TILE, size), false)
 	var is_open := doors_open()
 	for d in doors.keys():
-		var r := Rect2(OFFSET + Vector2(d) * TILE, Vector2(TILE - 2, TILE - 2))
-		if is_open:
-			draw_rect(r, Color("e07a5f"), false, 3.0)
-		else:
-			draw_rect(r, Color("e07a5f"))
-	for v in vis:
-		draw_texture_rect(TEX_BLOB, Rect2(v - size / 2, size), false)
-	draw_string(ThemeDB.fallback_font, Vector2(100, 40), "Level %d / %d" % [current + 1, levels.size()], HORIZONTAL_ALIGNMENT_LEFT, -1, 20)
+		var a := 0.25 if is_open else 1.0
+		draw_texture_rect(TEX_GATE, Rect2(OFFSET + Vector2(d) * TILE, size), false, Color(1, 1, 1, a))
+	var animating := not split_anim.is_empty()
+	for i in vis.size():
+		if animating and (i == 0 or i == split_anim.idx):
+			continue
+		draw_texture_rect(TEX_BLOB, Rect2(vis[i] - size / 2, size), false)
+	if animating:
+		var tex: Texture2D = split_frames[mini(int(split_anim.p), SPLIT_FRAMES - 1)]
+		var src := tex.get_size()
+		var s := TILE / src.y
+		var sp: Vector2i = split_anim.pos
+		var board_xf := Transform2D(0.0, Vector2.ONE * board_scale(), 0.0, board_pos())
+		var local_xf := Transform2D(Vector2(split_anim.dir).angle(), Vector2(s, s), 0.0, tile_center(sp))
+		draw_set_transform_matrix(board_xf * local_xf)
+		draw_texture(tex, -Vector2(src.y, src.y) / 2)
+		draw_set_transform_matrix(board_xf)
 	if won:
 		var msg := "Solved! Space for next level, R to replay" if current < levels.size() - 1 else "All levels done! R to replay"
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_string(ThemeDB.fallback_font, Vector2(100, 80), msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 28)
+	if paused:
+		draw_pause()
