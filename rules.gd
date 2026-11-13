@@ -4,7 +4,7 @@ const SPLIT_DIRS := [Vector2i.RIGHT, Vector2i.LEFT, Vector2i.DOWN, Vector2i.UP]
 const MOVES := {"R": Vector2i.RIGHT, "L": Vector2i.LEFT, "U": Vector2i.UP, "D": Vector2i.DOWN}
 
 static func parse(rows: Array) -> Dictionary:
-	var lv := {"rows": rows, "walls": {}, "ice": {}, "goals": [], "buttons": [], "blobs":[]}
+	var lv := {"rows": rows, "walls": {}, "doors": {}, "ice": {}, "goals": [], "buttons": [], "blobs": []}
 	for y in rows.size():
 		for x in rows[y].length():
 			var p := Vector2i(x, y)
@@ -21,7 +21,7 @@ static func doors_open(lv: Dictionary, blobs: Array) -> bool:
 	for b in lv.buttons:
 		if not blobs.has(b):
 			return false
-	return false
+	return true
 
 static func is_free(lv: Dictionary, pos: Vector2i, is_open: bool) -> bool:
 	var rows: Array = lv.rows
@@ -80,18 +80,21 @@ static func merge(positions: Array) -> Array:
 static func move(lv: Dictionary, blobs: Array, dir: Vector2i) -> Array:
 	return merge(slide(lv, blobs, dir))
 
-static func key(blobs: Array) -> String:
-	var parts := PackedStringArray()
+static func key(lv: Dictionary, blobs: Array) -> int:
+	var w: int = lv.rows[0].length()
+	var base: int = w * lv.rows.size() + 1
+	var k := 0
 	for b in blobs:
-		parts.append("%d,%d" % [b.x, b.y])
-	return ";".join(parts)
+		k = k * base + b.y * w + b.x + 1
+	return k
 
-static func solve(lv: Dictionary, max_states: int = 300000) -> Dictionary:
+static func solve(lv: Dictionary, max_states: int = 300000, max_moves: int = 1000) -> Dictionary:
 	var start: Array = lv.blobs
 	var states: Array = [start]
 	var parent: Array = [-1]
 	var action: Array = [""]
-	var seen := {key(start): true}
+	var depth: Array = [0]
+	var seen := {key(lv, start): true}
 	var head := 0
 	while head < states.size():
 		var cur: Array = states[head]
@@ -104,18 +107,22 @@ static func solve(lv: Dictionary, max_states: int = 300000) -> Dictionary:
 			return {"solved": true, "moves": path.size(), "path": path, "states": states.size()}
 		if states.size() > max_states:
 			return {"solved": false, "capped": true, "states": states.size()}
+		if depth[head] >= max_moves:
+			head += 1
+			continue
 		for a in ["R", "L", "U", "D", "S"]:
 			var nxt: Array
 			if a == "S":
 				nxt = split(lv, cur)
 			else:
 				nxt = move(lv, cur, MOVES[a])
-			var k := key(nxt)
+			var k := key(lv, nxt)
 			if seen.has(k):
 				continue
 			seen[k] = true
 			states.append(nxt)
 			parent.append(head)
 			action.append(a)
+			depth.append(depth[head] + 1)
 		head += 1
 	return {"solved": false, "capped": false, "states": states.size()}
