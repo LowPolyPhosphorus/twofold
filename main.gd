@@ -40,6 +40,11 @@ var ice := {}
 var lv := {}
 var daily_mode := false
 var daily_data := {}
+var best_moves := 0
+var daily_best := 0
+var on_levels := false
+var unlocked_cache := 0
+var best_cache: Array[int] = []
 
 func _ready() -> void:
 	for i in range(1, GOAL_FRAMES + 1):
@@ -47,11 +52,14 @@ func _ready() -> void:
 	for i in range(1, SPLIT_FRAMES + 1):
 		split_frames.append(load("res://art/split-transition/split-transition-%d.png" % i))
 	get_viewport().size_changed.connect(queue_redraw)
+	current = mini(Save.unlocked(), levels.size() - 1)
+	daily_best = Save.daily_moves(Generator.daily_seed())
 	load_level()
 
 func load_level() -> void:
 	level = daily_data.rows if daily_mode else levels[current]
 	lv = Rules.parse(level)
+	refresh_best()
 	walls.clear()
 	goals.clear()
 	blobs.clear()
@@ -80,6 +88,18 @@ func load_level() -> void:
 func check_win() -> void:
 	won = Rules.is_won(lv, blobs)
 
+func refresh_best() -> void:
+	best_moves = Save.daily_moves(daily_data.day) if daily_mode else Save.best(current)
+
+func save_win() -> void:
+	if daily_mode:
+		Save.record_daily(daily_data.day, history.size())
+		daily_best = Save.daily_moves(daily_data.day)
+	else:
+		Save.record(current, history.size())
+		Save.unlock(mini(current + 1, levels.size() - 1))
+	refresh_best()
+
 func doors_open() -> bool:
 	return Rules.doors_open(lv, blobs)
 
@@ -94,39 +114,39 @@ func _unhandled_input(event: InputEvent) -> void:
 	if on_title:
 		var click: bool = event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT
 		var m := get_local_mouse_position()
+		if on_levels:
+			var esc: bool = event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE
+			if esc or (click and back_rect().has_point(m)):
+				on_levels = false
+			elif click:
+				for i in levels.size():
+					if i <= unlocked_cache and level_cell(i).has_point(m):
+						daily_mode = false
+						current = i
+						load_level()
+						on_levels = false
+						on_title = false
+						break
+			queue_redraw()
+			return
 		var key_hit: bool = event is InputEventKey and event.pressed and not event.echo and event.keycode != KEY_ESCAPE
 		if click and daily_rect().has_point(m):
-			print("daily clicked")
-			if daily_data.is_empty():
+			if daily_data.is_empty() or daily_data.day != Generator.daily_seed():
 				daily_data = Generator.daily()
-				print("daily empty? ", daily_data.is_empty())
 			if not daily_data.is_empty():
 				if not daily_mode:
 					daily_mode = true
 					load_level()
 				on_title = false
 				queue_redraw()
+		elif click and levels_rect().has_point(m):
+			open_levels()
 		elif (click and start_rect().has_point(m)) or key_hit:
 			if daily_mode:
 				daily_mode = false
 				load_level()
 			on_title = false
 			queue_redraw()
-		return
-	if paused:
-		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-			paused = false
-		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-			var m := get_local_mouse_position()
-			if pause_rect(0).has_point(m):
-				paused = false
-			elif pause_rect(1).has_point(m):
-				paused = false
-				load_level()
-			elif pause_rect(2).has_point(m):
-				paused = false
-				on_title = true
-		queue_redraw()
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
@@ -246,11 +266,27 @@ func _process(delta: float) -> void:
 
 func start_rect() -> Rect2:
 	var vp := get_viewport_rect().size
-	return Rect2(Vector2(vp.x / 2 - 130, vp.y * 0.62), Vector2(260, 70))
+	return Rect2(Vector2(vp.x / 2 - 130, vp.y * 0.56), Vector2(260, 70))
 
 func daily_rect() -> Rect2:
 	var r := start_rect()
-	return Rect2(r.position + Vector2(0, 90), r.size)
+	return Rect2(start_rect().position + Vector2(0, 82), Vector2(260, 70))
+
+func levels_rect() -> Rect2:
+	return Rect2(start_rect().position + Vector2(0, 164), Vector2(260, 70))
+
+func back_rect() -> Rect2:
+	return Rect2(Vector2(40, 40), Vector2(140, 50))
+
+func level_cell(i: int) -> Rect2:
+	var vp := get_viewport_rect().size
+	var cols := 5
+	var cell := Vector2(110, 110)
+	var gap := Vector2(16, 16)
+	var rows := ceili(float(levels.size()) / cols)
+	var total := Vector2(cols, rows) * cell + Vector2(cols - 1, rows - 1) * gap
+	var origin := (vp - total) / 2 + Vector2(0, 30)
+	return Rect2(origin + Vector2(i % cols, floori(float(i) / cols)) * (cell + gap), cell)
 
 func draw_title() -> void:
 	var vp := get_viewport_rect().size
@@ -268,7 +304,7 @@ func draw_title() -> void:
 	box.set_border_width_all(3)
 	box.set_corner_radius_all(14)
 	draw_style_box(box, r)
-	draw_string(font, Vector2(r.position.x, r.position.y + 47), "Start", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 32, Color("ffffff") if hover else Color("0a0a0a"))
+	draw_string(font, Vector2(r.position.x, r.position.y + 47), ("Start" if current == 0 else "Continue  %d" % (current + 1)), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 32, Color("ffffff") if hover else Color("0a0a0a"))
 	var dr := daily_rect()
 	var dhover := dr.has_point(get_local_mouse_position())
 	var dbox := StyleBoxFlat.new()
@@ -278,6 +314,55 @@ func draw_title() -> void:
 	dbox.set_corner_radius_all(14)
 	draw_style_box(dbox, dr)
 	draw_string(font, Vector2(dr.position.x, dr.position.y + 47), "Daily", HORIZONTAL_ALIGNMENT_CENTER, dr.size.x, 32, Color("0a0a0a") if dhover else Color("ffffff"))
+	var lr := levels_rect()
+	var lhover := lr.has_point(get_local_mouse_position())
+	var lbox := StyleBoxFlat.new()
+	lbox.bg_color = Color("ffffff") if lhover else Color("0a0a0a")
+	lbox.border_color = Color("ffffff")
+	lbox.set_border_width_all(3)
+	lbox.set_corner_radius_all(14)
+	draw_style_box(lbox, lr)
+	draw_string(font, Vector2(lr.position.x, lr.position.y + 47), "Levels", HORIZONTAL_ALIGNMENT_CENTER, lr.size.x, 32, Color("0a0a0a") if lhover else Color("ffffff"))
+
+func open_levels() -> void:
+	unlocked_cache = Save.unlocked()
+	best_cache.clear()
+	for i in levels.size():
+		best_cache.append(Save.best(i))
+	on_levels = true
+	queue_redraw()
+
+func draw_levels() -> void:
+	var vp := get_viewport_rect().size
+	var font := ThemeDB.fallback_font
+	var m := get_local_mouse_position()
+	draw_rect(Rect2(Vector2.ZERO, vp), Color("0a0a0a"))
+	draw_string(font, Vector2(0, vp.y * 0.14), "Levels", HORIZONTAL_ALIGNMENT_CENTER, vp.x, 48, Color("ffffff"))
+	for i in levels.size():
+		var r := level_cell(i)
+		var playable := i <= unlocked_cache
+		var hover := playable and r.has_point(m)
+		var box := StyleBoxFlat.new()
+		box.bg_color = Color("ffffff") if hover else Color("0a0a0a")
+		box.border_color = Color("ffffff") if playable else Color("444444")
+		box.set_border_width_all(3)
+		box.set_corner_radius_all(14)
+		draw_style_box(box, r)
+		var fg := Color("444444")
+		if playable:
+			fg = Color("0a0a0a") if hover else Color("ffffff")
+		draw_string(font, Vector2(r.position.x, r.position.y + 55), str(i + 1), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 40, fg)
+		if playable and best_cache[i] > 0:
+			draw_string(font, Vector2(r.position.x, r.position.y + 90), "best %d" % best_cache[i], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 18, fg)
+	var br := back_rect()
+	var bhover := br.has_point(m)
+	var bbox := StyleBoxFlat.new()
+	bbox.bg_color = Color("ffffff") if bhover else Color("0a0a0a")
+	bbox.border_color = Color("ffffff")
+	bbox.set_border_width_all(3)
+	bbox.set_corner_radius_all(12)
+	draw_style_box(bbox, br)
+	draw_string(font, Vector2(br.position.x, br.position.y + 35), "Back", HORIZONTAL_ALIGNMENT_CENTER, br.size.x, 24, Color("0a0a0a") if bhover else Color("ffffff"))
 
 func pause_rect(i: int) -> Rect2:
 	var vp := get_viewport_rect().size
@@ -299,7 +384,10 @@ func draw_pause() -> void:
 
 func _draw() -> void:
 	if on_title:
-		draw_title()
+		if on_levels:
+			draw_levels()
+		else:
+			draw_title()
 		return
 	draw_set_transform(board_pos(), 0.0, Vector2.ONE * board_scale())
 	var size := Vector2(TILE, TILE)
@@ -339,7 +427,9 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var label := "Level %d / %d" % [current + 1, levels.size()]
 	if daily_mode:
-		label = "Daily par %d moves %d" % [daily_data.par, history.size()]
+		label = "Daily par%d moves %d" % [daily_data.par, history.size()]
+	if best_moves > 0:
+		label += "  best %d" % best_moves
 	draw_string(ThemeDB.fallback_font, Vector2(100, 40), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 20)
 	if won:
 		var msg := "Solved! Space for next level, R to replay" if current < levels.size() - 1 else "All levels done! R to replay"

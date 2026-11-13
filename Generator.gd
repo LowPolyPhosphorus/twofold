@@ -10,7 +10,11 @@ static func daily_seed() -> int:
 	return d.year * 10000 + d.month * 100 + d.day
 
 static func daily() -> Dictionary:
-	return make(daily_seed())
+	var day := daily_seed()
+	var d := make(day)
+	if not d.is_empty():
+		d["day"] = day
+	return d
 
 static func make(seed_value: int) -> Dictionary:
 	for attempt in MAX_ATTEMPTS:
