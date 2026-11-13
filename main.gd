@@ -45,6 +45,8 @@ var daily_best := 0
 var on_levels := false
 var unlocked_cache := 0
 var best_cache: Array[int] = []
+var music: AudioStreamPlayer
+var music_on := true
 
 func _ready() -> void:
 	for i in range(1, GOAL_FRAMES + 1):
@@ -54,6 +56,12 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(queue_redraw)
 	current = mini(Save.unlocked(), levels.size() - 1)
 	daily_best = Save.daily_moves(Generator.daily_seed())
+	music = AudioStreamPlayer.new()
+	add_child(music)
+	if ResourceLoader.exists("res://music/new-direction.mp3"):
+		music.stream = load("res://music/new-direction.mp3")
+		music.volume_db = -8.0
+		music.play()
 	load_level()
 
 func load_level() -> void:
@@ -167,6 +175,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.keycode == KEY_ESCAPE:
 			paused = true
 			queue_redraw()
+			return
+		if event.keycode == KEY_M:
+			music_on = not music_on
+			music.stream_paused = not music_on
 			return
 		if event.keycode == KEY_R:
 			load_level()
