@@ -148,6 +148,21 @@ func _unhandled_input(event: InputEvent) -> void:
 			on_title = false
 			queue_redraw()
 		return
+	if paused:
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			paused = false
+		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			var pm := get_local_mouse_position()
+			if pause_rect(0).has_point(pm):
+				paused = false
+			elif pause_rect(1).has_point(pm):
+				paused = false
+				load_level()
+			elif pause_rect(2).has_point(pm):
+				paused = false
+				on_title = true
+		queue_redraw()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
 			paused = true
@@ -202,6 +217,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	sync_vis()
 	history.append(before)
 	check_win()
+	if won:
+		save_win()
 	queue_redraw()
 
 func tile_center(p: Vector2i) -> Vector2:
