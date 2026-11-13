@@ -51,6 +51,11 @@ func _ready() -> void:
 			print("Level %d: %d moves  %s" % [i + 1, r.moves, "".join(r.path)])
 		else:
 			print("Level %d: no solution (%d states)" % [i + 1, r.states])
+	var daily := Generator.daily()
+	if not daily.is_empty():
+		levels = levels.duplicate()
+		levels.append(daily.rows)
+		print("Daily par %d: %s" % [daily.par, daily.solution])
 	load_level()
 
 func load_level() -> void:
@@ -93,18 +98,6 @@ func split() -> void:
 		return
 	blobs.append(blobs[0] + d)
 	split_anim = {"pos": blobs[0], "dir": d, "idx": blobs.size() - 1, "p": 0.0}
-
-func split() -> void:
-	if blobs.size() >= goals.size():
-		return
-	var is_open := doors_open()
-	var dirs: Array[Vector2i] = [Vector2i.RIGHT, Vector2i.LEFT, Vector2i.DOWN, Vector2i.UP]
-	for d in dirs:
-		var t: Vector2i = blobs[0] + d
-		if is_free(t, is_open) and not blobs.has(t):
-			blobs.append(t)
-			split_anim = {"pos": blobs[0], "dir": d, "idx": blobs.size() - 1, "p": 0.0}
-			return
 
 func _unhandled_input(event: InputEvent) -> void:
 	if on_title:
@@ -164,7 +157,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.is_action_pressed("ui_down"): dir = Vector2i.DOWN
 		if dir == Vector2i.ZERO:
 			return
-		blobs.assign(Rules.slid(lv, blobs, dir))
+		blobs.assign(Rules.slide(lv, blobs, dir))
 		var unique: Array[Vector2i] = []
 		var unique_vis: Array[Vector2] = []
 		for i in blobs.size():
