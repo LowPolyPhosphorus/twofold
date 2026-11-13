@@ -85,3 +85,37 @@ static func key(blobs: Array) -> String:
 	for b in blobs:
 		parts.append("%d,%d" % [b.x, b.y])
 	return ";".join(parts)
+
+static func solve(lv: Dictionary, max_states: int = 300000) -> Dictionary:
+	var start: Array = lv.blobs
+	var states: Array = [start]
+	var parent: Array = [-1]
+	var action: Array = [""]
+	var seen := {key(start): true}
+	var head := 0
+	while head < states.size():
+		var cur: Array = states[head]
+		if is_won(lv, cur):
+			var path := PackedStringArray()
+			var i := head
+			while parent[i] != -1:
+				path.insert(0, action[i])
+				i = parent[i]
+			return {"solved": true, "moves": path.size(), "path": path, "states": states.size()}
+		if states.size() > max_states:
+			return {"solved": false, "capped": true, "states": states.size()}
+		for a in ["R", "L", "U", "D", "S"]:
+			var nxt: Array
+			if a == "S":
+				nxt = split(lv, cur)
+			else:
+				nxt = move(lv, cur, MOVES[a])
+			var k := key(nxt)
+			if seen.has(k):
+				continue
+			seen[k] = true
+			states.append(nxt)
+			parent.append(head)
+			action.append(a)
+		head += 1
+	return {"solved": false, "capped": false, "states": states.size()}
