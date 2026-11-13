@@ -310,9 +310,10 @@ func draw_title() -> void:
 	var font := ThemeDB.fallback_font
 	draw_rect(Rect2(Vector2.ZERO, vp), Color("0a0a0a"))
 	var ls := TEX_LOGO.get_size()
-	var lw := minf(ls.x, vp.x * 0.6)
-	var lh := lw * ls.y / ls.x
-	draw_texture_rect(TEX_LOGO, Rect2(Vector2((vp.x - lw) / 2, vp.y * 0.45 - lh / 2), Vector2(lw, lh)), false)
+	var space := start_rect().position.y
+	var sc := minf(vp.x * 0.6 / ls.x, (space - 60.0) / ls.y)
+	var lsz := ls * sc
+	draw_texture_rect(TEX_LOGO, Rect2(Vector2((vp.x - lsz.x) / 2, (space - lsz.y) / 2), lsz), false)
 	var r := start_rect()
 	var hover := r.has_point(get_local_mouse_position())
 	var box := StyleBoxFlat.new()
