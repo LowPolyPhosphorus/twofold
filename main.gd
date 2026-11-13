@@ -38,6 +38,8 @@ var goal_frames: Array[Texture2D] = []
 var goal_p := {}
 var ice := {}
 var lv := {}
+var daily_mode := false
+var daily_data := {}
 
 func _ready() -> void:
 	for i in range(1, GOAL_FRAMES + 1):
@@ -45,21 +47,10 @@ func _ready() -> void:
 	for i in range(1, SPLIT_FRAMES + 1):
 		split_frames.append(load("res://art/split-transition/split-transition-%d.png" % i))
 	get_viewport().size_changed.connect(queue_redraw)
-	for i in levels.size():
-		var r := Rules.solve(Rules.parse(levels[i]))
-		if r.solved:
-			print("Level %d: %d moves  %s" % [i + 1, r.moves, "".join(r.path)])
-		else:
-			print("Level %d: no solution (%d states)" % [i + 1, r.states])
-	var daily := Generator.daily()
-	if not daily.is_empty():
-		levels = levels.duplicate()
-		levels.append(daily.rows)
-		print("Daily par %d: %s" % [daily.par, daily.solution])
 	load_level()
 
 func load_level() -> void:
-	level = levels[current]
+	level = daily_data.rows if daily_mode else levels[current]
 	lv = Rules.parse(level)
 	walls.clear()
 	goals.clear()
@@ -101,9 +92,24 @@ func split() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if on_title:
-		var clicked: bool = event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and start_rect().has_point(get_local_mouse_position())
+		var click: bool = event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT
+		var m := get_local_mouse_position()
 		var key_hit: bool = event is InputEventKey and event.pressed and not event.echo and event.keycode != KEY_ESCAPE
-		if clicked or key_hit:
+		if click and daily_rect().has_point(m):
+			print("daily clicked")
+			if daily_data.is_empty():
+				daily_data = Generator.daily()
+				print("daily empty? ", daily_data.is_empty())
+			if not daily_data.is_empty():
+				if not daily_mode:
+					daily_mode = true
+					load_level()
+				on_title = false
+				queue_redraw()
+		elif (click and start_rect().has_point(m)) or key_hit:
+			if daily_mode:
+				daily_mode = false
+				load_level()
 			on_title = false
 			queue_redraw()
 		return
@@ -141,9 +147,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not split_anim.is_empty():
 		return
 	if won:
-		if event.is_action_pressed("ui_accept") and current < levels.size() - 1:
-			current += 1
-			load_level()
+		if event.is_action_pressed("ui_accept"):
+			if daily_mode:
+				on_title = true
+				queue_redraw()
+			elif current < levels.size() - 1:
+				current += 1
+				load_level()
 		return
 
 	var before := blobs.duplicate()
@@ -236,7 +246,11 @@ func _process(delta: float) -> void:
 
 func start_rect() -> Rect2:
 	var vp := get_viewport_rect().size
-	return Rect2(Vector2(vp.x / 2 - 130, vp.y * 0.7), Vector2(260, 70))
+	return Rect2(Vector2(vp.x / 2 - 130, vp.y * 0.62), Vector2(260, 70))
+
+func daily_rect() -> Rect2:
+	var r := start_rect()
+	return Rect2(r.position + Vector2(0, 90), r.size)
 
 func draw_title() -> void:
 	var vp := get_viewport_rect().size
@@ -255,6 +269,15 @@ func draw_title() -> void:
 	box.set_corner_radius_all(14)
 	draw_style_box(box, r)
 	draw_string(font, Vector2(r.position.x, r.position.y + 47), "Start", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 32, Color("ffffff") if hover else Color("0a0a0a"))
+	var dr := daily_rect()
+	var dhover := dr.has_point(get_local_mouse_position())
+	var dbox := StyleBoxFlat.new()
+	dbox.bg_color = Color("ffffff") if dhover else Color("0a0a0a")
+	dbox.border_color = Color("ffffff")
+	dbox.set_border_width_all(3)
+	dbox.set_corner_radius_all(14)
+	draw_style_box(dbox, dr)
+	draw_string(font, Vector2(dr.position.x, dr.position.y + 47), "Daily", HORIZONTAL_ALIGNMENT_CENTER, dr.size.x, 32, Color("0a0a0a") if dhover else Color("ffffff"))
 
 func pause_rect(i: int) -> Rect2:
 	var vp := get_viewport_rect().size
@@ -313,8 +336,15 @@ func _draw() -> void:
 		draw_set_transform_matrix(board_xf * local_xf)
 		draw_texture(tex, -Vector2(src.y, src.y) / 2)
 		draw_set_transform_matrix(board_xf)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var label := "Level %d / %d" % [current + 1, levels.size()]
+	if daily_mode:
+		label = "Daily par %d moves %d" % [daily_data.par, history.size()]
+	draw_string(ThemeDB.fallback_font, Vector2(100, 40), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 20)
 	if won:
 		var msg := "Solved! Space for next level, R to replay" if current < levels.size() - 1 else "All levels done! R to replay"
+		if daily_mode:
+			msg = "Daily solved in %d (par %d)! Space for title, R to replay" % [history.size(), daily_data.par]
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_string(ThemeDB.fallback_font, Vector2(100, 80), msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 28)
 	if paused:
